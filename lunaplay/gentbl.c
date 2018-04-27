@@ -9,7 +9,7 @@
 
 #define countof(x) (sizeof(x) / sizeof((x)[0]))
 
-double VT[16] = {
+const double PSG_VT[16] = {
 	0,
 	0.0078125,
 	1.104854346e-2,
@@ -240,7 +240,7 @@ void
 pcm1()
 {
 	for (int i = 0; i < 16; i++) {
-		PCM1[i].v = VT[i];
+		PCM1[i].v = PSG_VT[i];
 		PCM1[i].a = i;
 	}
 
@@ -254,7 +254,7 @@ pcm2()
 	for (int a = 0; a < 16; a++) {
 		for (int b = 0; b < 16; b++) {
 			struct PTE *p = &PCM2[a * 16 + b];
-			p->v = VT[a] + VT[b];
+			p->v = PSG_VT[a] + PSG_VT[b];
 			p->a = a;
 			p->b = b;
 			p->c = 0;
@@ -271,7 +271,7 @@ pcm3()
 		for (int b = 0; b < 16; b++) {
 			for (int c = 0; c < 16; c++) {
 				struct PTE *p = &PCM3[a * 16 * 16 + b * 16 + c];
-				p->v = VT[a] + VT[b] + VT[c];
+				p->v = PSG_VT[a] + PSG_VT[b] + PSG_VT[c];
 				p->a = a;
 				p->b = b;
 				p->c = c;
