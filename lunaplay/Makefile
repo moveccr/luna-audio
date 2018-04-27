@@ -1,8 +1,12 @@
 # TODO: comment
 
-PROG= lunaplay gentbl
-SRCS= lunaplay.c
+PROG= lunaplay
+SRCS= lunaplay.c psgconv.c psgvt.c
 LDADD+= -lm
+
+.PHONY:	gentbl
+gentbl:
+	${MAKE} -f Makefile.gentbl
 
 
 

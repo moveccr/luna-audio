@@ -67,6 +67,7 @@ pte_search(struct PTE *pt, int count, double v)
 		}
 	}
 
+	C = (L + R) / 2;
 	int rv = C;
 	double min_dv = DBL_MAX;
 	L = C - 1;
@@ -185,6 +186,8 @@ pto_print(struct PTO *pto, int pto_count,
 		errx(1, "internal error, invalid channel_count %d", channel_count);
 	}
 
+	printf("const double %s_gain = %a;\n", table_name, gain);
+	printf("const double %s_offset = %a;\n", table_name, offset);
 	printf("const %s %s[] = {\n", table_type, table_name);
 	printf("\t %*s/* u8 v : gained : out v */\n", channel_count * 2 + 3, "");
 

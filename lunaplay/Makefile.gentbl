@@ -1,0 +1,8 @@
+# TODO: comment
+
+PROG= gentbl
+SRCS= gentbl.c psgvt.c
+LDADD+= -lm
+MAN=
+
+.include <bsd.prog.mk>

@@ -39,10 +39,13 @@ usage()
 "  -h    show help\n"
 "\n"
 "format (ignore case)\n"
-"  LUNAPAM2  LUNAPAM2 format\n"
-"  LUNAPCM1  LUNAPCM1 format\n"
-"  WAV       WAV file format\n"
-"  AU        (not implemented)\n"
+"  WAV   WAV file format (input default)\n"
+"  AU    (not implemented)\n"
+"  PCM1  PCM1 format\n"
+"  PCM2  PCM1 format\n"
+"  PCM3  PCM1 format\n"
+"  PAM2  PAM2 format\n"
+"  PAM3  PAM3 format (output default)\n"
 		,
 		VERSION,
 		getprogname()
@@ -53,11 +56,12 @@ usage()
 /* フォーマットコード順に並べること。 */
 static const char *FMTSTR_list[] = {
 	FMTSTR_WAV,
-	FMTSTR_LUNAPAM2,
+	FMTSTR_AU,
 	FMTSTR_LUNAPCM1,
 	FMTSTR_LUNAPCM2,
 	FMTSTR_LUNAPCM3,
-	FMTSTR_AU,
+	FMTSTR_LUNAPAM2,
+	FMTSTR_LUNAPAM3,
 };
 
 /* フォーマット文字列から、フォーマットコードを返します。 */
@@ -95,7 +99,7 @@ main(int ac, char *av[])
 
 	in_file = "";
 	in_format = FMT_WAV;
-	out_format = FMT_LUNAPAM2;
+	out_format = FMT_PAM3;
 	out_file = "";
 
 	while ((c = getopt(ac, av, "f:i:O:o:hv")) != -1) {
