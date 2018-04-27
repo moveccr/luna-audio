@@ -1,3 +1,5 @@
+/* vi: set ts=5: */
+/* TODO: LICENSE */
 
 lunapam_dev_init()
 {

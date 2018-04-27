@@ -1,3 +1,6 @@
+# TODO: comment
 
-psgpcmplay:
+PROG= lunaplay
+SRCS= main.c
 
+.include <bsd.prog.mk>
