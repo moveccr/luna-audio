@@ -1,6 +1,6 @@
 # TODO: comment
 
 PROG= lunaplay
-SRCS= main.c
+SRCS= lunaplay.c
 
 .include <bsd.prog.mk>
