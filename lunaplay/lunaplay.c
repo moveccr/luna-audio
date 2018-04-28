@@ -2,11 +2,13 @@
 /* TODO: LICENSE */
 
 #include <err.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <strings.h>
 #include <unistd.h>
 #include "lunaplay.h"
+#include "psgconv.h"
 
 #define VERSION "0.1"
 
@@ -18,6 +20,21 @@ static const char *out_file;	// output file
 static int in_format;	// input format
 static int out_format;	// output format
 static int out_freq;	// output frequency
+
+CONVERTER converters[][7] = {
+	{
+		conv_pass,	// WAV
+		NULL,		// AU
+		conv_u8_pcm1, conv_u8_pcm2, conv_u8_pcm3,
+		conv_u8_pam2, conv_u8_pam3,
+	},
+	{ conv_pcm1_u8, NULL, conv_pass, NULL, NULL, NULL, NULL, },
+	{ conv_pcm2_u8, NULL, NULL, conv_pass, NULL, NULL, NULL, },
+	{ conv_pcm3_u8, NULL, NULL, NULL, conv_pass, NULL, NULL, },
+	{ conv_pam2_u8, NULL, NULL, NULL, NULL, conv_pass, NULL, },
+	{ conv_pam3_u8, NULL, NULL, NULL, NULL, NULL, conv_pass, },
+};
+
 
 _Noreturn
 void
@@ -57,11 +74,11 @@ usage()
 static const char *FMTSTR_list[] = {
 	FMTSTR_WAV,
 	FMTSTR_AU,
-	FMTSTR_LUNAPCM1,
-	FMTSTR_LUNAPCM2,
-	FMTSTR_LUNAPCM3,
-	FMTSTR_LUNAPAM2,
-	FMTSTR_LUNAPAM3,
+	FMTSTR_PCM1,
+	FMTSTR_PCM2,
+	FMTSTR_PCM3,
+	FMTSTR_PAM2,
+	FMTSTR_PAM3,
 };
 
 /* フォーマット文字列から、フォーマットコードを返します。 */
@@ -152,7 +169,68 @@ main(int ac, char *av[])
 	}
 
 
+	BUFFER src0, *src;
+	BUFFER dst0, *dst;
+	CONVERTER conv;
+	int in_fd;
+	int out_fd;
 
+	src = &src0;
+	dst = &dst0;
+
+	conv = converters[in_format][out_format];
+	if (conv == NULL) {
+		errx(1, "unsupported conversion");
+	}
+
+	if (strcmp(in_file, "-") == 0) {
+		in_fd = STDIN_FILENO;
+	} else {
+		in_fd = open(in_file, O_RDONLY);
+		if (in_fd == -1) {
+			err(1, "open: %s", in_file);
+		}
+	}
+
+	if (in_format == FMT_WAV) {
+		wav_read_init(src, in_fd);
+	} else if (in_format == FMT_AU) {
+		errx(1, "notimplemented");
+	} else {
+		lunaplay_read_init(src, in_fd);
+	}
+
+	if (strcmp(out_file, "") == 0) {
+		xp_write_init(dst);
+		// TODO: audio
+	} else {
+		if (strcmp(out_file, "-") == 0) {
+			out_fd = STDOUT_FILENO;
+		} else {
+			out_fd = open(out_file, O_WRONLY);
+			if (out_fd == -1) {
+				err(1, "open: %s", out_file);
+			}
+		}
+		if (out_format == FMT_WAV) {
+			wav_write_init(dst, out_fd);
+		} else if (out_format == FMT_AU) {
+		} else {
+			lunaplay_write_init(dst, out_fd);
+		}
+	}
+
+	dst->freq = src->freq;
+
+	while (1) {
+		src->reader(src);
+		if (src->count == 0) break;
+		conv(dst, src);
+		dst->writer(dst);
+	}
+
+	src->closer(src);
+	dst->closer(dst);
 
 	return 0;
 }

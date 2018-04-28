@@ -5,6 +5,8 @@
 
 #include "lunaplay.h"
 
+extern void conv_pass(BUFFER *dst, BUFFER *src);
+
 extern void conv_u8_pam2(BUFFER *dst, BUFFER *src);
 extern void conv_pam2_u8(BUFFER *dst, BUFFER *src);
 extern void conv_u8_pam3(BUFFER *dst, BUFFER *src);
@@ -16,6 +18,7 @@ extern void conv_pcm2_u8(BUFFER *dst, BUFFER *src);
 extern void conv_u8_pcm3(BUFFER *dst, BUFFER *src);
 extern void conv_pcm3_u8(BUFFER *dst, BUFFER *src);
 
+/* obsolete */
 extern void conv_s16BE_pam2(BUFFER *dst, BUFFER *src);
 extern void conv_s16LE_pam2(BUFFER *dst, BUFFER *src);
 extern void conv_s16BE_pam3(BUFFER *dst, BUFFER *src);

@@ -1,14 +1,28 @@
+/* vi: set ts=4: */
 
-xppsg_open()
+#define XP_DEV	"/dev/xp"
+
+int
+xp_write_init(BUFFER *buf)
 {
-	// XP プロセッサとの共有メモリを mmap
+	buf->fd = open(XP_DEV, O_RDWR);
+	if (fd == -1) {
+		err(EXIT_FAILURE, "open XP device");
+	}
+
+	ptr = mmap(NULL, XP_MAX_SIZE, PROT_WRITE | PROT_READ,
+		MAP_SHARED, buf->fd, 0);
+	if (ptr == MAP_FAILED) {
+		err(EXIT_FAILURE, "mmap");
+	}
 
 }
 
-xppsg_close()
+int
+xp_write(BUFFER *buf)
 {
-	// munmap
 }
+
 
 /* TODO:
  ファームウェアのロード

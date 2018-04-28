@@ -1,7 +1,7 @@
 # TODO: comment
 
 PROG= lunaplay
-SRCS= lunaplay.c psgconv.c psgvt.c
+SRCS= lunaplay.c psgconv.c psgvt.c wav.c
 LDADD+= -lm
 
 .PHONY:	gentbl

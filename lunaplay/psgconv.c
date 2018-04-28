@@ -1,12 +1,19 @@
 /* vi: set ts=4: */
 /* TODO: LICENSE */
 
+#include <string.h>
 #include "lunaplay.h"
 #include "psgconv.h"
 
 #include "pcm1.tbl"
 #include "pcm2.tbl"
 #include "pcm3.tbl"
+
+void
+conv_pass(BUFFER *dst, BUFFER *src)
+{
+	memcpy(dst->buf, src->buf, BUFFER_SIZE);
+}
 
 /* ----- PAM2 ----- */
 /* PAM2 ではとりあえず PCM2 と同じテーブルを使ってみる。
