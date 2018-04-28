@@ -1,3 +1,10 @@
+;
+;
+; used language:
+;  zasm 4.1
+;  http://k1.spdns.de/Develop/Projects/zasm
+;
+
 ; MEMORY MAP
 	; 0000 00FF        RESET/RST etc.
 	; 0100 01FF        shared variables
@@ -11,6 +18,7 @@
 	; FFE0 FFFF   32   interrupt vector table
 	
 
+	.Z180
 
 ; I/O PORT
 PSG_ADR	.EQU	83H		; PSG address
@@ -403,60 +411,41 @@ PAM3INT:
 
 PAM3INT_END:
 
-; vector table
-; copy to FFE0
-
-VECTOR:
-			; VEC_INT1
-	DW	INT_IGN
-			; VEC_INT2
-	DW	INT_IGN
-			; VEC_PRT0
-	DW	INT_IGN
-			; VEC_PRT1
-	DW	INT_IGN
-			; VEC_DMAC0
-	DW	INT_IGN
-			; VEC_DMAC1
-	DW	INT_IGN
-			; VEC_SIO
-	DW	INT_IGN
-			; VEC_ASCI0
-	DW	INT_IGN
-			; VEC_ASCI1
-	DW	INT_IGN
-			; INT_IGN
-	RETI
-
-VECTOR_END:
-
 
 			; internal RAM
-	.ORG	0FE00H
+	.PHASE	0FE00H
 INTERNAL_RAM:
+	.DEPHASE
 
-	.ORG	0FFE0H
+	.PHASE	0FFE0H
 INITIAL_SP:
+VECTOR:	.EQU	$$
 RUNTIME_VEC:
+
 VEC_INT1:
-	.ORG	0FFE0H + 2
+	DW	INT_IGN
 VEC_INT2:
-	.ORG	0FFE0H + 4
+	DW	INT_IGN
 VEC_PRT0:
-	.ORG	0FFE0H + 6
+	DW	INT_IGN
 VEC_PRT1:
-	.ORG	0FFE0H + 8
+	DW	INT_IGN
 VEC_DMAC0:
-	.ORG	0FFE0H + 10
+	DW	INT_IGN
 VEC_DMAC1:
-	.ORG	0FFE0H + 12
+	DW	INT_IGN
 VEC_SIO:
-	.ORG	0FFE0H + 14
+	DW	INT_IGN
 VEC_ASCI0:
-	.ORG	0FFE0H + 16
+	DW	INT_IGN
 VEC_ASCI1:
+	DW	INT_IGN
 			; 本当はここはベクタテーブルだが
 			; 使われることはないので押し込む。
-	.ORG	0FFE0H + 18
 INT_IGN:
+	RETI
+
+VECTOR_END:	.EQU	$$
+
+	.DEPHASE
 
