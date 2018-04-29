@@ -11,102 +11,23 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <sys/endian.h>
 #include "lunaplay.h"
+#include "filehelper.h"
 
-static int wav_read_1u8(BUFFER *buf);
-static int wav_read_2u8(BUFFER *buf);
-static int wav_read_1s16le(BUFFER *buf);
-static int wav_read_2s16le(BUFFER *buf);
+static int wav_read_1u8(DESC *desc, BUFFER *buf);
+static int wav_read_2u8(DESC *desc, BUFFER *buf);
+static int wav_read_1s16le(DESC *desc, BUFFER *buf);
+static int wav_read_2s16le(DESC *desc, BUFFER *buf);
 
-/* ***** read helper ***** */
-static
-int
-read32le(int fd, int32_t *rv)
-{
-	int n = read(fd, rv, 4);
-	if (n != 4) return 0;
-	*rv = le32toh(*rv);
-	return n;
-}
+static int wav_write_1u8(DESC *desc, BUFFER *buf);
 
-static
-int
-read16le(int fd, int16_t *rv)
-{
-	int n = read(fd, rv, 2);
-	if (n != 2) return 0;
-	*rv = le16toh(*rv);
-	return n;
-}
-
-static
-int
-readtag(int fd, uint32_t *rv)
-{
-	int n = read(fd, rv, 4);
-	if (n != 4) return 0;
-	*rv = be16toh(*rv);
-	return n;
-}
-
-static
-int
-cmptag(uint32_t tag, const char strtag[4])
-{
-	uint32_t t =
-		((uint8_t)strtag[0]) << 24
-	 |  ((uint8_t)strtag[1]) << 16
-	 |  ((uint8_t)strtag[2]) << 8
-	 |  ((uint8_t)strtag[3]);
-
-	return tag == t;
-}
-
-static
-void
-skip(int fd, int bytes)
-{
-	int b;
-	for (int i = 0; i < bytes; i++) {
-		read(fd, &b, 1);
-	}
-}
-
-/* ***** write helper ***** */
-static
-int
-writetag(int fd, char strtag[4])
-{
-	int n = write(fd, strtag, 4);
-	if (n != 4) return 0;
-	return n;
-}
-
-static
-int
-write32le(int fd, int32_t v)
-{
-	v = htole32(v);
-	int n = write(fd, &v, 4);
-	if (n != 4) return 0;
-	return n;
-}
-
-static
-int
-write16le(int fd, int16_t v)
-{
-	v = htole16(v);
-	int n = write(fd, &v, 2);
-	if (n != 2) return 0;
-	return n;
-}
+static int wav_read_close(DESC *desc);
+static int wav_write_close(DESC *desc);
 
 /* ***** initializer ***** */
 
 int
-wav_read_init(BUFFER *buf, int fd)
+wav_read_init(DESC *desc, int fd)
 {
 	int n;
 	int r;
@@ -149,11 +70,29 @@ wav_read_init(BUFFER *buf, int fd)
 			read16le(fd, &dummy16) &&
 			read16le(fd, &bitpersample)
 			;
+			if (opt_v) {
+				printf("fmtlen       :%d\n", fmtlen);
+				printf("fmtid        :%d\n", fmtid);
+				printf("channelcount :%d\n", channelcount);
+				printf("freq         :%d\n", freq);
+				printf("bitpersample :%d\n", bitpersample);
+			}
+
 			if (!r) {
-				fprintf(stderr, "fmt heaer error\n");
+				fprintf(stderr, "fmt header read error\n");
 				return -1;
 			}
-			skip(fd, fmtlen - (2+2+4+4+2+2));
+			int skip = fmtlen - (2+2+4+4+2+2);
+			if (skip < 0) {
+				fprintf(stderr, "fmt length error\n");
+				return -1;
+			} else if (skip > 0) {
+				r = readskip(fd, fmtlen - (2+2+4+4+2+2));
+				if (!r) {
+					fprintf(stderr, "fmt header skip error\n");
+					return -1;
+				}
+			}
 		} else if (cmptag(tag, "data")) {
 			if (!read32le(fd, &datalen)) {
 				fprintf(stderr, "data len error\n");
@@ -162,11 +101,14 @@ wav_read_init(BUFFER *buf, int fd)
 			break;
 		} else {
 			int32_t chunklen;
-			if (read32le(fd, &chunklen)) {
+			if (!read32le(fd, &chunklen)) {
 				fprintf(stderr, "unknown chunk error\n");
 				return -1;
 			}
-			skip(fd, chunklen);
+			if (!readskip(fd, chunklen)) {
+				fprintf(stderr, "unknown chunk read error\n");
+				return -1;
+			}
 		}
 	}
 	if (opt_v) {
@@ -181,43 +123,45 @@ wav_read_init(BUFFER *buf, int fd)
 		return -1;
 	}
 
-	const char *wavfmt;
-	buf->reader = NULL;
+	READER readers[] = {
+		wav_read_1u8, wav_read_2u8, wav_read_1s16le, wav_read_2s16le,
+	};
+	const char *readers_name[] = {
+		"1u8", "2u8", "1s16le", "2s16le",
+	};
+
+	int rdid = 0;
 	if (channelcount == 1) {
-		if (bitpersample == 8) {
-			wavfmt = "1u8";
-			buf->reader = wav_read_1u8;
-		} else if (bitpersample == 16) {
-			wavfmt = "1s16le";
-			buf->reader = wav_read_1s16le;
-		}
 	} else if (channelcount == 2) {
-		if (bitpersample == 8) {
-			wavfmt = "2u8";
-			buf->reader = wav_read_2u8;
-		} else if (bitpersample == 16) {
-			wavfmt = "2s16le";
-			buf->reader = wav_read_2s16le;
-		}
-	}
-	if (buf->reader == NULL) {
-		fprintf(stderr, "WAV unsupported format\n");
+		rdid += 1;
+	} else {
+		fprintf(stderr, "WAV unsupported channel count %d\n", channelcount);
 		return -1;
 	}
+	if (bitpersample == 8) {
+	} else if (bitpersample == 16) {
+		rdid += 2;
+	} else {
+		fprintf(stderr, "WAV unsupported bitpersample %d\n", bitpersample);
+		return -1;
+	}
+	desc->reader = readers[rdid];
 
 	if (opt_v) {
-		fprintf(stderr, "WAV format: %s\n", wavfmt);
+		fprintf(stderr, "WAV format: %s\n", readers_name[rdid]);
 	}
 
-	buf->buf = malloc(BUFFER_SIZE);
-	buf->count = 0;
-	buf->fd = fd;
-	buf->freq = freq;
-	buf->total = datalen;
+	desc->closer = wav_read_close;
+
+	// reader が u8 に変換する
+	desc->enc = ENC_U8;
+	desc->fd = fd;
+	desc->freq = freq;
+	return 0;
 }
 
 int
-wav_write_init(BUFFER *buf, int fd)
+wav_write_init(DESC *desc, int fd)
 {
 	/*
 	 * WAV ファイルは書き込みサイズが決まらないとヘッダが作れないので
@@ -232,70 +176,97 @@ wav_write_init(BUFFER *buf, int fd)
 	}
 	unlink(template);
 
-	buf->buf = malloc(BUFFER_SIZE);
-	buf->count = 0;
-	buf->fd = tmpfd;
-	buf->originalfd = fd;
+	desc->writer = wav_write_1u8;
+	desc->closer = wav_write_close;
+
+	desc->fd = tmpfd;
+	desc->originalfd = fd;
 }
 
 /* ***** reader ***** */
 
 static
 int
-wav_read_1u8(BUFFER *buf)
+wav_read_1u8(DESC *desc, BUFFER *buf)
 {
-	int n = read(buf->fd, buf->buf, BUFFER_SIZE);
-	buf->count = n;
+	int n = readbuf(desc->fd, buf->ptr + buf->length, buf->bufsize - buf->length);
+	if (n < 0) {
+		return n;
+	}
+	if (n == 0) {
+		return buf->length;
+	}
+	buf->length += n;
+	return buf->length;
 }
 
 static
 int
-wav_read_2u8(BUFFER *buf)
+wav_read_2u8(DESC *desc, BUFFER *buf)
 {
-	uint8_t tmp[BUFFER_SIZE * 2];
+	uint8_t tmp[XP_BUFSIZE * 2];
 
-	int n = read(buf->fd, tmp, BUFFER_SIZE * 2);
+	int n = readbuf(desc->fd, tmp, (buf->bufsize - buf->length) * 2);
+	if (n < 0) {
+		return n;
+	}
+	if (n == 0) {
+		return buf->length;
+	}
+
 	int count = n / 2;
 	uint8_t *s = tmp;
-	uint8_t *d = buf->buf;
+	uint8_t *d = buf->ptr + buf->length;
 	for (int i = 0; i < count; i++) {
 		uint16_t a, b;
 		a = *s++;
 		b = *s++;
 		*d++ = (a + b) >> 1;
 	}
-	buf->count = count;
+	buf->length += n;
+	return buf->length;
 }
 
 static
 int
-wav_read_1s16le(BUFFER *buf)
+wav_read_1s16le(DESC *desc, BUFFER *buf)
 {
-	uint8_t tmp[BUFFER_SIZE * 2];
+	uint8_t tmp[XP_BUFSIZE * 2];
 
-	int n = read(buf->fd, tmp, BUFFER_SIZE * 2);
+	int n = readbuf(desc->fd, tmp, (buf->bufsize - buf->length) * 2);
+	if (n < 0) {
+		return n;
+	}
+	if (n == 0) {
+		return buf->length;
+	}
 	int count = n / 2;
-	uint8_t *s = tmp;
-	s++;
-	uint8_t *d = buf->buf;
+	uint8_t *s = tmp + 1;
+	uint8_t *d = buf->ptr + buf->length;
 	for (int i = 0; i < count; i++) {
 		*d++ = (*s) ^ 0x80;
 		s += 2;
 	}
-	buf->count = count;
+	buf->length += count;
+	return buf->length;
 }
 
 static
 int
-wav_read_2s16le(BUFFER *buf)
+wav_read_2s16le(DESC *desc, BUFFER *buf)
 {
-	uint8_t tmp[BUFFER_SIZE * 4];
+	uint8_t tmp[XP_BUFSIZE * 4];
 
-	int n = read(buf->fd, tmp, BUFFER_SIZE * 4);
+	int n = readbuf(desc->fd, tmp, (buf->bufsize - buf->length) * 4);
+	if (n < 0) {
+		return n;
+	}
+	if (n == 0) {
+		return buf->length;
+	}
 	int count = n / 4;
-	uint8_t *s = tmp;
-	s++;
-	uint8_t *d = buf->buf;
+	uint8_t *s = tmp + 1;
+	uint8_t *d = buf->ptr + buf->length;
 	for (int i = 0; i < count; i++) {
 		uint16_t a, b;
 		a = (*s) ^ 0x80;
@@ -304,50 +275,46 @@ wav_read_2s16le(BUFFER *buf)
 		s += 2;
 		*d++ = (a + b) >> 1;
 	}
-	buf->count = count;
+	buf->length += count;
+	return buf->length;
 }
 
 /* ***** writer ***** */
+/* support only 1u8 */
 
 static
 int
-wav_write_1u8(BUFFER *buf)
+wav_write_1u8(DESC *desc, BUFFER *buf)
 {
-	int n = buf->count;
-	int r;
-	for (int m = 0; m < n; m += r) {
-		r = write(buf->fd, ((char*)buf->buf) + m, n - m);
-		if (r == -1) {
-			return -1;
-		}
-	}
-	return n;
+	int rv = writebuf(desc->fd, buf->ptr, buf->length);
+	buf->length = 0;
+	return rv;
 }
 
 /* ***** closer ***** */
 
 static
 int
-wav_read_close(BUFFER *buf)
+wav_read_close(DESC *desc)
 {
-	close(buf->fd);
-	free(buf->buf);
+	close(desc->fd);
+	return 0;
 }
 
 static
 int
-wav_write_close(BUFFER *buf)
+wav_write_close(DESC *desc)
 {
 	/*
 	 * テンポラリファイルとヘッダを合体させて最終ファイルを作る
 	 */
 
-	int fd = buf->originalfd;
-	int tmpfd = buf->fd;
+	int fd = desc->originalfd;
+	int tmpfd = desc->fd;
 	int r;
 	int rv = -1;
 
-	int32_t datalen = (int32_t)lseek(buf->fd, 0, SEEK_CUR);
+	int32_t datalen = (int32_t)lseek(desc->fd, 0, SEEK_CUR);
 
 	r = 
 	writetag(fd, "RIFF") &&
@@ -364,8 +331,8 @@ wav_write_close(BUFFER *buf)
 	write32le(fd, 16) &&	// fmt chunk length
 	write16le(fd, 1) &&		// PCM FORMAT
 	write16le(fd, 1) &&		// channel count
-	write32le(fd, buf->freq) &&	// freq
-	write32le(fd, buf->freq) &&	// data rate (1ch 1byte)
+	write32le(fd, desc->freq) &&	// freq
+	write32le(fd, desc->freq) &&	// data rate (1ch 1byte)
 	write16le(fd, 1) &&
 	write16le(fd, 8) &&
 	writetag(fd, "data") &&
@@ -379,27 +346,22 @@ wav_write_close(BUFFER *buf)
 	lseek(tmpfd, 0, SEEK_SET);
 	for (;;) {
 		char buf[4096];
-		int n = read(tmpfd, buf, sizeof(buf));
+		int n = readbuf(tmpfd, buf, sizeof(buf));
 		if (n == 0) break;
-		if (n == -1) {
+		if (n < 0) {
 			fprintf(stderr, "read: %s\n", strerror(errno));
 			goto done;
 		}
-		int r;
-		for (int m = 0; m < n; m += r) {
-			r = write(fd, buf + m, n - m);
-			if (r == -1) {
-				fprintf(stderr, "write: %s\n", strerror(errno));
-				goto done;
-			}
+		if (writebuf(fd, buf, n) < 0) {
+			fprintf(stderr, "write: %s\n", strerror(errno));
+			goto done;
 		}
 	}
 	rv = 0;
 
  done:
-	close(buf->fd);
-	close(buf->originalfd);
-	free(buf->buf);
+	close(desc->fd);
+	close(desc->originalfd);
 	return rv;
 }
 

@@ -39,6 +39,9 @@ NMI:
 
 ; shared variable area
 	.ORG	0100H
+				; MAGIC 8 byte
+MAGIC:		DB	"LUNAPSG",0
+
 				; start command (NZ = start)
 				; Host -> XP
 CMD_START:	DB	0
