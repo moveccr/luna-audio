@@ -1,4 +1,40 @@
 
+WAIT3	.MACRO
+	NOP
+.ENDM
+WAIT4	.MACRO
+	LD	A,A
+.ENDM
+WAIT5NC	.MACRO
+	RET	NC
+.ENDM
+WAIT6	.MACRO
+	WAIT3
+	WAIT3
+.ENDM
+WAIT7	.MACRO
+	WAIT3
+	WAIT4
+.ENDM
+WAIT8	.MACRO
+	WAIT4
+	WAIT4
+.ENDM
+WAIT9	.MACRO
+	WAIT3
+	WAIT3
+	WAIT3
+.ENDM
+WAIT16	.MACRO
+	WAIT4
+	WAIT4
+	WAIT4
+	WAIT4
+.ENDM
+
+
+
+	.ORG 0
 ;*** PAM バッファと PSG バッファは入れかえる
 ; start end type desc
 ;  0000 00FF SH RESET/RST etc.
@@ -23,14 +59,17 @@
 ; 8page/buf (=42.67ms)
 ; doublebuffer
 ;
-PAM_PTR	.EQU	PAM_STAT_PTR+1
-PAM_BUF	.EQU	8000H
+PAM_STAT_PTR	.EQU	004EH
+PAM_PTR		.EQU	PAM_STAT_PTR+1
+PAM_BUF		.EQU	8000H
 PAM_PAGEMASK	.EQU	8FH
 PAM_INTRMASK	.EQU	07H
+PORT_PSGDATA	.EQU	83H
+PORT_INTR_L	.EQU	99H
 	
 	.PHASE	7F00H
-PSGPAM_TABLE:
-	.DB	.....
+PAM_TABLE:
+	.DB	00
 
 	.PHASE	0FE00H
 	.LOCAL
@@ -48,7 +87,7 @@ PAM2_48_96_2::
 L01:
 			;残り16
 				; ここで D レジスタはインクリメント済みで、LD A,D してある
-	AND	PSGPAM_PAGEMASK	;6	;例=8FH
+	AND	PAM_PAGEMASK	;6	;例=8FH
 	LD	D,A	;4
 	WAIT6
 
@@ -63,10 +102,10 @@ L01:
 	LD	A,D	;4
 L10:
 	OUT	(C),L
-	LD	(PSGPAM_PTR),A	;13+3
+	LD	(PAM_PTR),A	;13+3
 	OUT	(C),B
 	WAIT4
-	AND	PSGPAM_INTRPAGEMASK	;6	;割り込み出力ページかどうか? MASK=03H だと 80,84,88,8C で割り込み、みたいな。
+	AND	PAM_INTRMASK	;6	;割り込み出力ページかどうか? MASK=03H だと 80,84,88,8C で割り込み、みたいな。
 	JR	NZ,L21	;6/8
 	WAIT8
 L11:
@@ -83,7 +122,7 @@ L20:
 	OUT	(C),L
 	WAIT16
 	OUT	(C),B
-	OUT	(INTR_L),A	;10+2	; 割り込み通知
+	OUT	(PORT_INTR_L),A	;10+2	; 割り込み通知
 	WAIT6
 L21:
 	WAIT6
@@ -126,9 +165,9 @@ L30:
 	.LOCAL
 
 PAM2_32_128_4::
-	LD	DE,8000H	;PSGPAM_BUF
+	LD	DE,PAM_BUF;	; 例=8000H
 	LD	C,PORT_PSGDATA
-	LD	H,hi(PSGPAM_TABLE)
+	LD	H,hi(PAM_TABLE)
 	LD	A,(DE)
 	LD	L,A
 	LD	B,(HL)
@@ -144,7 +183,7 @@ L01:
 	WAIT3
 
 	OUT	(C),L
-	LD	A,PSGPAM_PAGEMASK ;6	; 例:8FH
+	LD	A,PAM_PAGEMASK ;6	; 例:8FH
 	WAIT3
 	OUT	(C),B
 	AND	D	;4		; ページ範囲のマスクを適用して回す
@@ -202,14 +241,17 @@ L20:
 	WAIT3
 	OUT	(C),B
 	AND	D	;4
-	LD	A,L	;4		; この PAM 周期で出す L を A に保存
-	WAIT7
+	JR	NZ,L31	;6/8		; L20 の AND D の結果でジャンプ
+	WAIT5NC				; AND => CY=0
+
 L21:
 	OUT	(C),L
-	WAIT9
+	LD	A,L	;4		; この PAM 周期で出す L を A に保存
+	WAIT5NC				; AND => CY=0
 	OUT	(C),B
-	JR	NZ,L32	;6/8		; L20 の AND D の結果でジャンプ
-	WAIT9
+	OUT	(PORT_INTR_L),A	;10+2	; 割り込み通知
+	WAIT3
+
 L22:
 	OUT	(C),L
 	WAIT9
@@ -229,42 +271,17 @@ L30:
 	OUT	(C),L
 	WAIT9
 	OUT	(C),B
-	OUT	(INTR_L),A	;10+2	; 割り込み通知
-	WAIT3
-L31:
-	OUT	(C),L
-	WAIT9
-	OUT	(C),B
-	WAIT8
-L32:
-	LD	A,L	;4		; この PAM 周期で出す L を A に保存
-	WAIT3
-	OUT	(C),L
-	WAIT9
-	OUT	(C),B
-	EX	DE,HL	;3		; LD L,(DE) は無いが、A を破壊せずに (DE) から L にデータを読みたい
-	LD	E,(HL)	;6+3
-	EX	DE,HL	;3
-L33:
-	OUT	(C),A			; 保存しておいた方を出力
-	LD	A,(HL)	;6+3		; もう A を破壊していい
-	OUT	(C),B
-	LD	B,A	;4
-	RES	4,L	;7	; bit4 はエンベロープビットなので落とさないといけない (bit7-5は NC)
-	INC	E	;4
-
-L40:
-	OUT	(C),L
-	WAIT9
-	OUT	(C),B
 	JR	Z,L01	;6/8
-	WAIT9
-L41:
+	WAIT6
+L31:
+	WAIT3
 	OUT	(C),L
 	WAIT9
 	OUT	(C),B
-	JR	L32	;8
+	WAIT3
+	LD	A,L	;4		; この PAM 周期で出す L を A に保存
+	JR	L22	;8
 
 	.ENDLOCAL
-	.ENDPHASE
+	.DEPHASE
 
