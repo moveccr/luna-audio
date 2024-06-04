@@ -1,0 +1,375 @@
+LD	E,(HL)	;6
+INC	L	;4
+LD	A,(DE)	;6
+INC	D	;4
+OUT	(C),A	;10+2
+LD	A,(DE)	;6
+OUT	(C),A	;10+2
+DEC	D	;4
+JP	(IX)	;6
+
+; A 12+6=18
+; B W*3+6+4+6+4+10+2+4+6=42+3W  := 51@W3
+; A+B = 60+3W   := 69@W3
+
+-----
+
+;48kHz, 256Bytes 固定 u8 -> PAM2
+; 6144 / 48 = 128
+
+LD	E,(HL)	;6+3
+INC	L	;4
+LD	A,(DE)	;6+3
+INC	D	;4
+OUT	(C),A	;10+2
+LD	A,(DE)	;6+3
+OUT	(C),A	;10+2
+DEC	D	;4
+OUT	(C),A	;10+2
+OUT	(C),A	;10+2
+JP	(IX)	;6
+
+
+----
+
+; 32kHz, 4KB PAM2, PAM 128kHz, 4PHASE
+; MEM
+; 6000-7FFF
+;
+REWIND:
+	LD	H,80H	;6
+INTR:
+	OUT	(INT),A	;10+2
+LOOP:
+	OUT	(C),E
+	OUT	(C),D
+
+	OUT	(C),E
+	OUT	(C),D
+
+	DEC	HL	;4
+	LD	D,(HL)	;6
+	DEC	L
+	LD	E,(HL)	;6
+	JP	NZ,LOOP
+	LD	A,H
+	CP	70H	;6
+	JP	Z,INTR	;6/9
+	CP	60H	;6
+	JP	Z,REWIND	;6/9
+	JP	LOOP	;9
+
+---
+;PA RAM
+;00000-0FFFF XP
+;10000-1FFFF LANCE
+;20000-27FFF N.C.
+;28000-2FFFF XP-Private
+;FFE00-FFFFF XP-Builtin
+
+;VA RAM at PAM
+;VA		xBR	PA
+;0000-6FFF	00	00000-06FFF
+;7000-7FFF	F8	FF000-FFFFF
+;8000-FFFF	00	08000-0FFFF
+
+
+	LD	H,080H
+
+	INC	L
+	JP	NZ,LOOP1
+
+	INC	H
+	JP	Z,REWIND
+
+;---
+;PAM Packed Byte
+;最小サイクルが
+; LD r,(HL)	;6+3
+; OUT (C),r	;10+2
+; 9+12=21 サイクル
+;4PAM 48kHz=128clk/2=64
+;64-21=43
+; 21,43,21,43 で 1 サンプルにする。(ほぼ1:2PAM)
+
+
+L1:
+	LD	E,(HL)	;6+3
+L3:
+	OUT	(C),E	;10+2		=12+9=21
+	LD	A,(DE)	;6+3
+	OUT	(C),A	;10+2		=12+4+9=25
+	INC	L	;4
+	JP	Z,L2	;6/9
+	WAIT3
+	OUT	(C),E
+	WAIT9
+	OUT	(C),A
+	WAIT13
+	OUT	(C),E
+	LD	E,(HL)	;6+3
+	OUT	(C),A
+	JP	L3	;9
+L2:
+	INC	H
+	
+
+	
+	INC	H
+	JP
+	
+
+;*** PAM バッファと PSG バッファは入れかえる
+; start end type desc
+;  0000 00FF SH RESET/RST etc.
+;  0100 01FF SH shared variables
+;  0200 0FFF SH resident program
+;  1000 7FFF SH PSG buffer 28K
+;  8000 8FFF SH PAM/PCM buffer 4K
+;  9000 9FFF SH LPR buffer 4K
+;  A000 DFFF SH FDC buffer 16K
+;  E000 EFFF PR program/stack
+;  F000 FDFF NC bus error (00 or FF)
+;  FE00 FFDF IN PAM player
+;  FFE0 FFFF IN interrupt vector
+
+;----
+; 28[12+16]:36[12+24] = 21[12+9]:27[12+15] = 43.75 : 56.25 = 7 : 9
+
+; Packed, 48kHz, PAM96kHz2W, (28[12+16]+36[12+24]=64)*2=128clk
+; 1 byte/sample
+; 256 sample/page
+; 5.33 ms/page
+; 8page/buf (=42.67ms)
+;
+PAM_PTR	.EQU	PAM_STAT_PTR+1
+PAM_BUF	.EQU	8000H
+PAM_PAGEMASK	.EQU	8FH
+PAM_INTRMASK	.EQU	07H
+	
+	.PHASE	7F00H
+PSGPAM_TABLE:
+	.DB	.....
+
+	.PHASE	0FE00H
+	.LOCAL
+PAM2_48_96_2::
+
+	LD	DE,PAM_BUF;	例=8000H
+	LD	C,PORT_PSGDATA
+	LD	H,HIGH(PAM_TABLE)
+	LD	A,(DE)
+	LD	L,A
+	LD	B,(HL)
+	RES	4,L
+	JR	L10
+
+L01:
+			;残り16
+				; ここで D レジスタはインクリメント済みで、LD A,D してある
+	AND	PSGPAM_PAGEMASK	;6	;例=8FH
+	LD	D,A	;4
+	WAIT6
+
+	OUT	(C),L
+	LD	A,(DE)	;6+3
+	LD	L,A	;4
+	WAIT3
+	OUT	(C),B
+	LD	B,(HL)	;6+3
+	RES	4,L	;7
+	INC	E	;4
+	LD	A,D	;4
+L10:
+	OUT	(C),L
+	LD	(PSGPAM_PTR),A	;13+3
+	OUT	(C),B
+	WAIT4
+	AND	PSGPAM_INTRPAGEMASK	;6	;割り込み出力ページかどうか? MASK=03H だと 80,84,88,8C で割り込み、みたいな。
+	JR	NZ,L21	;6/8
+	WAIT8
+L11:
+	OUT	(C),L
+	LD	A,(DE)	;6+3
+	LD	L,A	;4
+	WAIT3
+	OUT	(C),B
+	LD	B,(HL)	;6+3
+	RES	4,L	;7
+	INC	E	;4
+	WAIT4
+L20:
+	OUT	(C),L
+	WAIT16
+	OUT	(C),B
+	OUT	(INTR_L),A	;10+2	; 割り込み通知
+	WAIT6
+L21:
+	WAIT6
+	OUT	(C),L
+	LD	A,(DE)	;6+3
+	LD	L,A	;4
+	WAIT3
+	OUT	(C),B
+	LD	B,(HL)	;6+3
+	RES	4,L	;7
+	WAIT8
+L30:
+	OUT	(C),L
+	WAIT4
+	INC	D	;4	; L01 向けトリックで先にインクリメントとコピー
+	LD	A,D	;4
+	INC	E	;4
+	OUT	(C),B
+	JR	Z,L01	;6/8
+	DEC	D	;4
+	JR	L21	;8
+
+	.ENDLOCAL
+	.DEPHASE
+
+;
+; Packed, 32kHz, PAM96kHz3W, (x+y=64)*3=192clk
+;  ... 32kHz128kHz4Wができたので不要。
+;
+; Packed, 32kHz, PAM128kHz2P4W, (20[12+8]+28[12+16]=48)*4=192clk
+; 256byte バッファ x N 構成
+;  256byte = 8ms
+; 再生終了は割り込みを掛けて止める。
+;メモ
+; データは packed 形式。1 バイト/サンプル。下位4ビットが 20clkパルス、上位4ビットが 28clkパルス。
+;
+; 2相, サンプリング周波数32kHz, PAM 周波数128kHz, 4パルス/サンプル
+PAM2_32_128_4:
+	LD	DE,8000H	;PSGPAM_BUF
+	LD	C,PORT_PSGDATA
+	LD	H,HIGH(PSGPAM_TABLE)
+	LD	A,(DE)
+	LD	L,A
+	LD	B,(HL)
+	RES	4,L
+	JP	L10
+
+L00:
+	; ここに相当する出力はない。
+L01:
+					;ループ下からは INC D した状態でここに来る
+					;DE = バッファアドレス。E=0 必須。
+	WAIT7
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	LD	A,PSGPAM_PAGEMASK ;6	;例:8FH
+	WAIT10
+
+L02:
+	OUT	(C),L
+	AND	D	;4		;ページ範囲のマスクを適用して回す
+	LD	D,A	;4
+	OUT	(C),B
+	LD	A,(DE)	;6+3
+	INC	E	;4
+	WAIT3
+L03:
+	OUT	(C),L
+	LD	L,A	;4
+	WAIT4
+	OUT	(C),B
+	LD	B,(HL)	;6+3
+	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+
+L10:
+	OUT	(C),L
+	LD	A,D	;4
+	WAIT4
+	OUT	(C),B
+	LD	(PSGPAM_PTR),A	;13+3?	; 処理中のページを外部に通知
+L11:
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	WAIT16
+L12:
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	LD	A,(DE)	;6+3
+	INC	E	;4
+	WAIT3
+L13:
+	OUT	(C),L
+	LD	L,A	;4
+	WAIT4
+	OUT	(C),B
+	LD	B,(HL)	;6+3
+	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+
+L20:
+	OUT	(C),L
+	LD	A,D	;4
+	WAIT4
+	OUT	(C),B
+	AND	PSGPAM_INTRPAGEMASK	;6	;割り込み出力ページかどうか? MASK=03H だと 80,84,88,8C で割り込み、みたいな。
+	WAIT10
+L21:
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	JP	Z,L32	;6/9	; L20 で立てたフラグを使用
+	WAIT10
+L22:
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	LD	A,(DE)	;6+3
+	INC	E	;4
+	WAIT3
+L23:
+	OUT	(C),L
+	LD	L,A	;4
+	WAIT4
+	OUT	(C),B
+	LD	B,(HL)	;6+3
+	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+
+L30:
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	OUT	(INTR_L),A	;10+2	; 割り込み通知
+	WAIT4
+L31:
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	WAIT9
+L32:
+	WAIT7
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	LD	A,(DE)	;6+3
+	INC	E	;4
+	WAIT3
+L33:
+	OUT	(C),L
+	LD	L,A	;4
+	WAIT4
+	OUT	(C),B
+	LD	B,(HL)	;6+3
+	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+
+L40:
+	OUT	(C),L
+	INC	D	;4	;TRICK: L01 の入力要件に合わせてある
+	INC	E	;4
+	OUT	(C),B
+	JP	Z,L01	;6/9
+	DEC	D	;4	; 上のTRICK回収
+	WAIT6
+L41:
+	OUT	(C),L
+	WAIT8
+	OUT	(C),B
+	JP	L32	;9
+
