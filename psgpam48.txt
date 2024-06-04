@@ -21,6 +21,7 @@
 ; 256 sample/page
 ; 5.33 ms/page
 ; 8page/buf (=42.67ms)
+; doublebuffer
 ;
 PAM_PTR	.EQU	PAM_STAT_PTR+1
 PAM_BUF	.EQU	8000H
@@ -37,7 +38,7 @@ PAM2_48_96_2::
 
 	LD	DE,PAM_BUF;	例=8000H
 	LD	C,PORT_PSGDATA
-	LD	H,HIGH(PAM_TABLE)
+	LD	H,hi(PAM_TABLE)
 	LD	A,(DE)
 	LD	L,A
 	LD	B,(HL)
@@ -112,18 +113,22 @@ L30:
 ; Packed, 32kHz, PAM96kHz3W, (x+y=64)*3=192clk
 ;  ... 32kHz128kHz4Wができたので不要。
 ;
-; Packed, 32kHz, PAM128kHz2P4W, (20[12+8]+28[12+16]=48)*4=192clk
+; Packed, 32kHz, PAM128kHz2P4W, (21[12+9]+27[12+15]=48)*4=192clk
 ; 256byte バッファ x N 構成
 ;  256byte = 8ms
 ; 再生終了は割り込みを掛けて止める。
 ;メモ
-; データは packed 形式。1 バイト/サンプル。下位4ビットが 20clkパルス、上位4ビットが 28clkパルス。
+; データは packed 形式。1 バイト/サンプル。下位4ビットが 21clkパルス、上位4ビットが 27clkパルス。
 ;
 ; 2相, サンプリング周波数32kHz, PAM 周波数128kHz, 4パルス/サンプル
-PAM2_32_128_4:
+
+	.PHASE	0FE00H
+	.LOCAL
+
+PAM2_32_128_4::
 	LD	DE,8000H	;PSGPAM_BUF
 	LD	C,PORT_PSGDATA
-	LD	H,HIGH(PSGPAM_TABLE)
+	LD	H,hi(PSGPAM_TABLE)
 	LD	A,(DE)
 	LD	L,A
 	LD	B,(HL)
@@ -133,123 +138,133 @@ PAM2_32_128_4:
 L00:
 	; ここに相当する出力はない。
 L01:
-					;ループ下からは INC D した状態でここに来る
-					;DE = バッファアドレス。E=0 必須。
-	WAIT7
-	OUT	(C),L
-	WAIT8
-	OUT	(C),B
-	LD	A,PSGPAM_PAGEMASK ;6	;例:8FH
-	WAIT10
+					; ループ下からは INC D する前の状態でここに来る
+					; DE = バッファアドレス。E=0 必須。
+	INC	D
+	WAIT3
 
+	OUT	(C),L
+	LD	A,PSGPAM_PAGEMASK ;6	; 例:8FH
+	WAIT3
+	OUT	(C),B
+	AND	D	;4		; ページ範囲のマスクを適用して回す
+	LD	D,A	;4
+	LD	A,L	;4		; この PAM 周期で出す L を A に保存
+	WAIT3
 L02:
 	OUT	(C),L
-	AND	D	;4		;ページ範囲のマスクを適用して回す
-	LD	D,A	;4
+	WAIT9
 	OUT	(C),B
-	LD	A,(DE)	;6+3
-	INC	E	;4
-	WAIT3
+	EX	DE,HL	;3		; LD L,(DE) は無いが、A を破壊せずに (DE) から L にデータを読みたい
+	LD	E,(HL)	;6+3
+	EX	DE,HL	;3
 L03:
-	OUT	(C),L
-	LD	L,A	;4
-	WAIT4
+	OUT	(C),A			; 保存しておいた方を出力
+	LD	A,(HL)	;6+3		; もう A を破壊していい
 	OUT	(C),B
-	LD	B,(HL)	;6+3
-	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+	LD	B,A	;4
+	RES	4,L	;7	; bit4 はエンベロープビットなので落とさないといけない (bit7-5は NC)
+	INC	E	;4
 
 L10:
+					; ここでは HL をいったん壊してでもバッファアドレスをメモリ書き出し
 	OUT	(C),L
-	LD	A,D	;4
-	WAIT4
+	WAIT9
 	OUT	(C),B
-	LD	(PSGPAM_PTR),A	;13+3?	; 処理中のページを外部に通知
+	LD	A,L	;4		; この PAM 周期で出す L を A に保存
+	CCF		;3		; for WAIT5NC
+	WAIT8
 L11:
-	OUT	(C),L
-	WAIT8
+	OUT	(C),A
+	LD	HL,PAM_PTR	;9	; H は定数なので後で戻せば大丈夫。L は破壊していい。
 	OUT	(C),B
-	WAIT16
+	LD	(HL),D	;7+3		; 処理中のページを外部に通知
+	WAIT5NC
 L12:
-	OUT	(C),L
-	WAIT8
-	OUT	(C),B
-	LD	A,(DE)	;6+3
-	INC	E	;4
+	OUT	(C),A
+	LD	H,hi(PAM_TABLE) ;6	; H 復元
 	WAIT3
-L13:
-	OUT	(C),L
-	LD	L,A	;4
-	WAIT4
 	OUT	(C),B
-	LD	B,(HL)	;6+3
-	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+	EX	DE,HL	;3		; LD L,(DE) は無いが、A を破壊せずに (DE) から L にデータを読みたい
+	LD	E,(HL)	;6+3
+	EX	DE,HL	;3
+L13:
+	OUT	(C),A
+	LD	A,(HL)	;6+3		; もう A を破壊していい
+	OUT	(C),B
+	LD	B,A	;4
+	RES	4,L	;7	; bit4 はエンベロープビットなので落とさないといけない (bit7-5は NC)
+	INC	E	;4
 
 L20:
 	OUT	(C),L
-	LD	A,D	;4
-	WAIT4
+	LD	A,PAM_INTRMASK ;6	; 割り込み出力ページかどうか? MASK=03H だと 80,84,88,8C で割り込み、みたいな。
+	WAIT3
 	OUT	(C),B
-	AND	PSGPAM_INTRPAGEMASK	;6	;割り込み出力ページかどうか? MASK=03H だと 80,84,88,8C で割り込み、みたいな。
-	WAIT10
+	AND	D	;4
+	LD	A,L	;4		; この PAM 周期で出す L を A に保存
+	WAIT7
 L21:
 	OUT	(C),L
-	WAIT8
+	WAIT9
 	OUT	(C),B
-	JP	Z,L32	;6/9	; L20 で立てたフラグを使用
-	WAIT10
+	JR	NZ,L32	;6/8		; L20 の AND D の結果でジャンプ
+	WAIT9
 L22:
 	OUT	(C),L
-	WAIT8
+	WAIT9
 	OUT	(C),B
-	LD	A,(DE)	;6+3
-	INC	E	;4
-	WAIT3
+	EX	DE,HL	;3		; LD L,(DE) は無いが、A を破壊せずに (DE) から L にデータを読みたい
+	LD	E,(HL)	;6+3
+	EX	DE,HL	;3
 L23:
-	OUT	(C),L
-	LD	L,A	;4
-	WAIT4
+	OUT	(C),A			; 保存しておいた方を出力
+	LD	A,(HL)	;6+3		; もう A を破壊していい
 	OUT	(C),B
-	LD	B,(HL)	;6+3
-	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+	LD	B,A	;4
+	RES	4,L	;7	; bit4 はエンベロープビットなので落とさないといけない (bit7-5は NC)
+	INC	E	;4
 
 L30:
 	OUT	(C),L
-	WAIT8
+	WAIT9
 	OUT	(C),B
 	OUT	(INTR_L),A	;10+2	; 割り込み通知
-	WAIT4
+	WAIT3
 L31:
 	OUT	(C),L
-	WAIT8
-	OUT	(C),B
 	WAIT9
-L32:
-	WAIT7
-	OUT	(C),L
+	OUT	(C),B
 	WAIT8
-	OUT	(C),B
-	LD	A,(DE)	;6+3
-	INC	E	;4
+L32:
+	LD	A,L	;4		; この PAM 周期で出す L を A に保存
 	WAIT3
-L33:
 	OUT	(C),L
-	LD	L,A	;4
-	WAIT4
+	WAIT9
 	OUT	(C),B
-	LD	B,(HL)	;6+3
-	RES	4,L	;7		; bit4 はエンベロープビットなので落とさないといけない
+	EX	DE,HL	;3		; LD L,(DE) は無いが、A を破壊せずに (DE) から L にデータを読みたい
+	LD	E,(HL)	;6+3
+	EX	DE,HL	;3
+L33:
+	OUT	(C),A			; 保存しておいた方を出力
+	LD	A,(HL)	;6+3		; もう A を破壊していい
+	OUT	(C),B
+	LD	B,A	;4
+	RES	4,L	;7	; bit4 はエンベロープビットなので落とさないといけない (bit7-5は NC)
+	INC	E	;4
 
 L40:
 	OUT	(C),L
-	INC	D	;4	;TRICK: L01 の入力要件に合わせてある
-	INC	E	;4
+	WAIT9
 	OUT	(C),B
-	JP	Z,L01	;6/9
-	DEC	D	;4	; 上のTRICK回収
-	WAIT6
+	JR	Z,L01	;6/8
+	WAIT9
 L41:
 	OUT	(C),L
-	WAIT8
+	WAIT9
 	OUT	(C),B
-	JP	L32	;9
+	JR	L32	;8
+
+	.ENDLOCAL
+	.ENDPHASE
 
