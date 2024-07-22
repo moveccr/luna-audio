@@ -1,3 +1,7 @@
+/*
+ * COPYRIGHT 2024 @moveccr
+ */
+
 #include <err.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -8,13 +12,20 @@
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 
-#define PRINTF	printf
-
+#if defined(DEBUG)
+ #define PRINTF	printf
+#else
+ #define PRINTF(...)
+#endif
 
 void
 usage()
 {
-	printf("naplay <file>\n");
+	printf(
+"naplay [option] <file>\n"
+" -Ln: loop n times. <0 as INF\n"
+" file: .au or .wav\n"
+);
 	exit(1);
 }
 
@@ -107,8 +118,32 @@ main(int ac, char *av[])
 	const int buflen = 4096;
 	uint8_t buf[buflen];
 	struct audio_info info;
+	char *filename = NULL;
+	int loop = 1;
+	off_t start_ofs;
 
-	if (ac < 2) {
+	{
+		int i;
+		for (i = 1; i < ac; i++) {
+			if (av[i][0] == '-') {
+				if (av[i][1] == 'L') {
+					if (av[i][2]) {
+						loop = atoi(&av[i][2]);
+					} else if (i + 1 < ac) {
+						i += 1;
+						loop = atoi(av[i]);
+					} else {
+						usage();
+					}
+				}
+			} else {
+				filename = av[i];
+				break;
+			}
+		}
+	}
+
+	if (filename == NULL) {
 		usage();
 	}
 
@@ -117,7 +152,7 @@ main(int ac, char *av[])
 		err(EXIT_FAILURE, "open");
 	}
 
-	fd = open(av[1], O_RDONLY | O_DIRECT);
+	fd = open(filename, O_RDONLY | O_DIRECT);
 	if (fd == -1) {
 		err(EXIT_FAILURE, "open");
 	}
@@ -128,7 +163,7 @@ main(int ac, char *av[])
 
 	read_exact(fd, buf, 4);
 	if (strncmp(buf, ".snd", 4) == 0) {
-		// au
+		/* au */
 		int au_offset = read_be32(fd);
 		int au_datasize = read_be32(fd);
 		int au_enc = read_be32(fd);
@@ -197,20 +232,37 @@ main(int ac, char *av[])
 		err(EXIT_FAILURE, "AUDIO_SETINFO");
 	}
 
+	if (loop < 0 || loop > 1) {
+		start_ofs = lseek(fd, 0, SEEK_CUR);
+		if (start_ofs < 0) {
+			err(EXIT_FAILURE, "lseek");
+		}
+	}
 
-	for (;;) {
-		ssize_t r, w;
-		r = read_buf(fd, buf, buflen);
-		if (r == 0) break;
-		if (r < 0) {
-			err(EXIT_FAILURE, "read");
+	while (loop != 0) {
+		if (loop < 0 || loop > 1) {
+			if (lseek(fd, start_ofs, SEEK_SET) < 0) {
+				err(EXIT_FAILURE, "lseek");
+			}
 		}
-		w = write(afd, buf, r);
-		if (w < 0) {
-			err(EXIT_FAILURE, "write");
+		if (loop > 0) {
+			loop--;
 		}
-		if (r != w) {
-			errx(EXIT_FAILURE, "r != w");
+
+		for (;;) {
+			ssize_t r, w;
+			r = read_buf(fd, buf, buflen);
+			if (r == 0) break;
+			if (r < 0) {
+				err(EXIT_FAILURE, "read");
+			}
+			w = write(afd, buf, r);
+			if (w < 0) {
+				err(EXIT_FAILURE, "write");
+			}
+			if (r != w) {
+				errx(EXIT_FAILURE, "r != w");
+			}
 		}
 	}
 
